@@ -7,7 +7,7 @@ import Generate from './pages/Generate';
 import WebsiteEditor from './pages/WebsiteEditor';
 import LiveSite from './pages/LiveSite';
 import Pricing from './pages/Pricing';
-export const serverUrl = 'http://localhost:8000'
+export const serverUrl = 'https://genweb-ai-b5js.onrender.com'
 
 const ProtectedRoute = ({ children }) => {
   const { userData, isAuthLoading } = useSelector((state) => state.user);
