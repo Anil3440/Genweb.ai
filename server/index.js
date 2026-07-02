@@ -2,6 +2,8 @@ import express from 'express';
 import dotenv from 'dotenv';
 dotenv.config();
 import connectDb from './config/db.js';
+import redis from './config/redis.js';
+import { globalLimiter } from './middlewares/rateLimiter.js';
 import authRouter from './routes/auth.routes.js';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -23,12 +25,25 @@ app.use(cors({
     credentials: true
 }))
 
+// Apply global rate limiter to all API routes
+app.use(globalLimiter);
+
 app.use('/api/auth',authRouter);
 app.use('/api/user',userRouter);
 app.use('/api/website',websiteRouter);
 app.use('/api/billing',billingRouter);
 
-app.listen(port,()=>{
-    console.log(`server listening on port ${port}...`);
-    connectDb();
+app.listen(port, () => {
+  console.log(`server listening on port ${port}...`);
+  connectDb();
+  redis.connect().catch((err) =>
+    console.error('Redis initial connect error:', err.message)
+  );
+});
+
+// Graceful shutdown — close Redis when server stops
+process.on('SIGINT', async () => {
+  await redis.quit();
+  console.log('Redis disconnected gracefully.');
+  process.exit(0);
 });

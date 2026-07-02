@@ -3,6 +3,7 @@ import { generateResponse } from "../config/openRouter.js";
 import User from "../models/user.model.js";
 import Website from "../models/website.modal.js";
 import extractJson from "../utils/extractJson.js";
+import redis, { CacheKeys } from "../config/redis.js";
 
 const frontendUrl = process.env.FRONTEND_URL?.replace(/^"(.*)"$/, "$1").trim() || "http://localhost:5173";
 
@@ -214,6 +215,12 @@ export const generateWebsite = async (req, res) => {
     user.credits -= 50;
     await user.save();
 
+    // ── Cache Invalidation ──────────────────────────────────────────
+    // A new website was created → the "all websites" list is now stale
+    await redis.del(CacheKeys.allWebsites(user._id.toString()));
+    console.log(`🗑️  Cache invalidated: allWebsites for user ${user._id}`);
+    // ───────────────────────────────────────────────────────────────
+
     return res.status(201).json({
       websiteId: website._id,
       remainingCredits: user.credits,
@@ -313,21 +320,32 @@ export const changes = async (req, res) => {
     website.conversation.push(
       {role: "user",content: prompt},
       {role: "ai",content: parsed.message}
-    )
+    );
     website.latestCode = parsed.code;
     await website.save();
 
     user.credits -= 25;
     await user.save();
 
+    // ── Cache Invalidation ──────────────────────────────────────────
+    // Website content changed → delete both the individual and list caches
+    const userId = user._id.toString();
+    const websiteId = website._id.toString();
+    await redis.del(
+      CacheKeys.websiteById(userId, websiteId),
+      CacheKeys.allWebsites(userId)
+    );
+    console.log(`🗑️  Cache invalidated: websiteById + allWebsites for user ${userId}`);
+    // ───────────────────────────────────────────────────────────────
+
     return res.status(200).json({
       message: parsed.message,
       code: parsed.code,
       remainingCredits: user.credits
-    })
+    });
 
   } catch (error) {
-    return res.status(500).json({message: `Update Website Error ${error}`})
+    return res.status(500).json({message: `Update Website Error ${error}`});
   }
 };
 
@@ -356,16 +374,27 @@ export const deploy = async(req,res) => {
 
     if(!website.slug){
       website.slug = website.title.toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,60)+website._id.toString().slice(-5);
-      website.deployed = true;
     }
 
     website.deployed = true;
     website.deployUrl = `${frontendUrl}/site/${website.slug}`;
-    await website.save()
+    await website.save();
+
+    // ── Cache Invalidation ──────────────────────────────────────────
+    // Deploy changes the slug/deployUrl → invalidate website cache
+    const userId = req.user._id.toString();
+    const websiteId = website._id.toString();
+    await redis.del(
+      CacheKeys.websiteById(userId, websiteId),
+      CacheKeys.allWebsites(userId),
+      CacheKeys.websiteBySlug(website.slug)
+    );
+    console.log(`🗑️  Cache invalidated: deployed site ${website.slug}`);
+    // ───────────────────────────────────────────────────────────────
 
     return res.status(200).json({
       url: website.deployUrl
-    })
+    });
   } catch (error) {
     return res.status(500).json({message: `deploy website error ${error}`});
   }
